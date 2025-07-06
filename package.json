@@ -1,0 +1,60 @@
+{
+  "name": "wiz-cve-scraper",
+  "version": "1.0.0",
+  "description": "A robust Node.js tool to extract CVE data from the Wiz vulnerability database using their Algolia API",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --inspect src/app.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.js",
+    "scrape": "node src/scraper.js",
+    "api": "node src/api.js"
+  },
+  "keywords": [
+    "web-scraping",
+    "puppeteer",
+    "cve",
+    "vulnerability",
+    "security",
+    "wiz"
+  ],
+  "author": "CVE Scraper Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "commander": "^11.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "fs-extra": "^11.2.0",
+    "helmet": "^7.1.0",
+    "joi": "^17.11.0",
+    "node-cron": "^3.0.3",
+    "p-limit": "^3.1.0",
+    "progress": "^2.0.3",
+    "puppeteer": "^24.11.2",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "eslint-config-standard": "^17.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-n": "^16.6.2",
+    "eslint-plugin-promise": "^6.1.1",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/wiz-cve-scraper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/wiz-cve-scraper/issues"
+  },
+  "homepage": "https://github.com/your-username/wiz-cve-scraper#readme"
+}
