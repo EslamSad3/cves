@@ -326,17 +326,10 @@ class WizCVEScraper {
     logger.info('Starting comprehensive CVE loading with parallel technology filters...');
     
     const allCVEs = new Map(); // Use Map to automatically handle duplicates by CVE ID
-    
-    // Step 1: Fetch all available CVEs without filters (or up to maxCVEs limit)
     const maxHitsToFetch = this.options.maxCVEs || 140558; // Use maxCVEs or fetch all available
-    logger.info(`Step 1: Fetching up to ${maxHitsToFetch} CVEs without filters...`);
-    await this.fetchCVEsWithFilters([], allCVEs, maxHitsToFetch);
     
-    // Step 2: Fetch CVEs for all technology filters in parallel
-    logger.info(`Step 2: Fetching CVEs for ${this.technologyFilters.length} technology filters in parallel...`);
-    
-    // Create a progress bar
-    const progressBar = new ProgressBar('Technology filters [:bar] :current/:total (:percent) ETA: :etas', {
+    // Create progress bars
+    const techProgressBar = new ProgressBar('Technology filters [:bar] :current/:total (:percent) ETA: :etas', {
       complete: '█',
       incomplete: '░',
       width: 40,
@@ -351,12 +344,25 @@ class WizCVEScraper {
         
         await this.fetchCVEsWithFilters([filter], allCVEs, maxHitsToFetch);
         
-        progressBar.tick();
+        techProgressBar.tick();
         return { success: true, technology: techName };
       } catch (error) {
         logger.error(`Failed to fetch CVEs for filter ${filter}:`, error.message);
-        progressBar.tick();
+        techProgressBar.tick();
         return { success: false, technology: filter.split('||')[1], error: error.message };
+      }
+    };
+    
+    // Define function to fetch initial CVEs without filters
+    const fetchInitialCVEs = async () => {
+      try {
+        logger.info(`Fetching up to ${maxHitsToFetch} CVEs without filters...`);
+        await this.fetchCVEsWithFilters([], allCVEs, maxHitsToFetch);
+        logger.info('Initial CVE fetch completed');
+        return { success: true, type: 'initial' };
+      } catch (error) {
+        logger.error('Failed to fetch initial CVEs:', error.message);
+        return { success: false, type: 'initial', error: error.message };
       }
     };
     
@@ -370,21 +376,37 @@ class WizCVEScraper {
       chunks.push(this.technologyFilters.slice(i, i + concurrencyLimit));
     }
     
-    // Process each chunk in parallel
+    // Create array of all parallel tasks
+    const allTasks = [];
+    
+    // Add initial CVE fetch task
+    allTasks.push(fetchInitialCVEs());
+    
+    // Add technology filter tasks in chunks
     for (const chunk of chunks) {
-      const promises = chunk.map(filter => processTechnologyFilter(filter));
-      await Promise.all(promises);
+      const chunkPromises = chunk.map(filter => processTechnologyFilter(filter));
+      allTasks.push(...chunkPromises);
       
-      // Add a small delay between chunks to avoid overwhelming the API
-      if (this.options.delayBetweenRequests > 0) {
-        await sleep(this.options.delayBetweenRequests);
+      // Add a small delay between chunk creation to stagger requests
+      if (this.options.delayBetweenRequests > 0 && chunks.indexOf(chunk) < chunks.length - 1) {
+        await sleep(this.options.delayBetweenRequests / 2); // Half delay for staggering
       }
     }
     
-    // Step 3: Convert Map to array (duplicates already removed)
+    logger.info(`Starting ${allTasks.length} parallel tasks (1 initial + ${this.technologyFilters.length} technology filters)...`);
+    
+    // Execute all tasks in parallel
+    const results = await Promise.all(allTasks);
+    
+    // Log results summary
+    const successfulTasks = results.filter(r => r.success).length;
+    const failedTasks = results.filter(r => !r.success).length;
+    logger.info(`Parallel execution completed: ${successfulTasks} successful, ${failedTasks} failed`);
+    
+    // Convert Map to array (duplicates already removed)
     this.cveData = Array.from(allCVEs.values());
     
-    logger.info(`Step 3: Removed duplicates. Total unique CVEs: ${this.cveData.length}`);
+    logger.info(`Final result: ${this.cveData.length} unique CVEs collected`);
     logger.info('Parallel comprehensive CVE loading completed.');
   }
 
