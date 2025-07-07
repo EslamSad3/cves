@@ -63,20 +63,29 @@ const ensureDir = async (dirPath) => {
  * @param {string} filename - Filename without extension
  * @param {Object} data - Data to save
  * @param {string} outputDir - Output directory
+ * @param {boolean} useTimestampedFolder - Whether to create timestamped subfolder
  * @returns {Promise<string>} - Full path of saved file
  */
-const saveToJson = async (filename, data, outputDir = config.output.dir) => {
-  await ensureDir(outputDir);
+const saveToJson = async (filename, data, outputDir = config.output.dir, useTimestampedFolder = false) => {
+  let finalOutputDir = outputDir;
+  
+  if (useTimestampedFolder) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0] + '_' + 
+                     new Date().toISOString().replace(/[:.]/g, '-').split('T')[1].split('.')[0];
+    finalOutputDir = path.join(outputDir, `scrape_${timestamp}`);
+  }
+  
+  await ensureDir(finalOutputDir);
   
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const fullFilename = `${filename}_${timestamp}.json`;
-  const filePath = path.join(outputDir, fullFilename);
+  const filePath = path.join(finalOutputDir, fullFilename);
   
   try {
     await fs.writeJson(filePath, data, { spaces: 2 });
     logger.info(`Data saved to: ${filePath}`);
     
-    // Also save as latest
+    // Also save as latest in the main output directory
     const latestPath = path.join(outputDir, `${filename}_latest.json`);
     await fs.writeJson(latestPath, data, { spaces: 2 });
     

@@ -84,7 +84,8 @@ class CVEScraperApp {
         delayBetweenRequests: options.delay,
         retryAttempts: options.retry,
         maxCVEs: options.maxCves,
-        resumeFromCheckpoint: options.resume
+        resumeFromCheckpoint: options.resume,
+        useComprehensiveScraping: true // Enable comprehensive scraping by default
       });
 
       // Check for resume option
@@ -103,8 +104,9 @@ class CVEScraperApp {
       const result = await this.scraper.scrapeAllCVEs();
       const duration = Date.now() - startTime;
 
-      // Save results
-      const outputPath = await saveToJson(options.output, result);
+      // Save results with timestamped folder for comprehensive scraping
+      const useTimestampedFolder = this.scraper.options.useComprehensiveScraping;
+      const outputPath = await saveToJson(options.output, result, config.output.dir, useTimestampedFolder);
       
       // Generate analytics if not disabled
       if (options.analytics !== false && result.cveData.length > 0) {
@@ -115,7 +117,7 @@ class CVEScraperApp {
           analytics
         };
         
-        await saveToJson(`${options.output}_analytics`, analyticsResult);
+        await saveToJson(`${options.output}_analytics`, analyticsResult, config.output.dir, useTimestampedFolder);
         logger.info('Analytics generated and saved');
       }
 

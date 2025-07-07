@@ -24,8 +24,12 @@ class WizCVEScraper {
       maxCVEs: options.maxCVEs || config.scraping.maxCVEs,
       hitsPerPage: options.hitsPerPage || config.algolia.hitsPerPage,
       maxPages: options.maxPages || config.algolia.maxPages,
+      useComprehensiveScraping: options.useComprehensiveScraping !== false,
+      parallelRequests: options.parallelRequests || 5,
       ...options
     };
+    
+    logger.info(`Scraper initialized with useComprehensiveScraping: ${this.options.useComprehensiveScraping}`);
     
     // Algolia API configuration
     this.algoliaConfig = {
@@ -35,6 +39,109 @@ class WizCVEScraper {
       indexName: config.algolia.indexName,
       timeout: config.algolia.timeout
     };
+    
+    // Comprehensive technology filters for parallel scraping
+    this.technologyFilters = [
+      'https://assets.wiz.io/technology-icons/LinuxDebian-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Debian',
+      'https://assets.wiz.io/technology-icons/LinuxUbuntu-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Ubuntu',
+      'https://assets.wiz.io/technology-icons/LinuxRedHat-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Red Hat',
+      'https://assets.wiz.io/technology-icons/WordPress-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||WordPress',
+      'https://assets.wiz.io/technology-icons/LinuxOpenSUSE-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux openSUSE',
+      'https://assets.wiz.io/technology-icons/NixOS-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||NixOS',
+      'https://assets.wiz.io/technology-icons/LinuxGentoo-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Gentoo',
+      'https://assets.wiz.io/technology-icons/LinuxOracle-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Oracle',
+      'https://assets.wiz.io/technology-icons/Homebrew-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Homebrew',
+      'https://assets.wiz.io/technology-icons/AmazonLinux-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Amazon Linux',
+      'https://assets.wiz.io/technology-icons/LinuxFedora-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Fedora',
+      'https://assets.wiz.io/technology-icons/LinuxKernel-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Kernel',
+      'https://assets.wiz.io/technology-icons/LinuxAlpine-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Alpine',
+      'https://assets.wiz.io/technology-icons/Java-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Java',
+      'https://assets.wiz.io/technology-icons/LinuxPhoton-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux Photon',
+      'https://assets.wiz.io/technology-icons/PHP-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||PHP',
+      'https://assets.wiz.io/technology-icons/AlmaLinux-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Alma Linux',
+      'https://assets.wiz.io/technology-icons/CBLMariner-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||CBL Mariner',
+      'https://assets.wiz.io/technology-icons/AlibabaCloudLinux-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Alibaba Cloud Linux (Aliyun Linux)',
+      'https://assets.wiz.io/technology-icons/JavaScript-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||JavaScript',
+      'https://assets.wiz.io/technology-icons/LinuxCentOS-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Linux CentOS',
+      'https://assets.wiz.io/technology-icons/Python-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Python',
+      'https://assets.wiz.io/technology-icons/GoogleChrome-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Google Chrome',
+      'https://assets.wiz.io/technology-icons/MozillaFirefox-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Mozilla Firefox',
+      'https://assets.wiz.io/technology-icons/Chromium-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Chromium',
+      'https://assets.wiz.io/technology-icons/Chainguard-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Chainguard',
+      'https://assets.wiz.io/technology-icons/RockyLinux-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Rocky Linux',
+      'https://assets.wiz.io/technology-icons/macOS-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||macOS',
+      'https://assets.wiz.io/technology-icons/AdobeAcrobatReaderClassic-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Acrobat Reader Classic',
+      'https://assets.wiz.io/technology-icons/AdobeAcrobatClassic-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Acrobat Classic',
+      'https://assets.wiz.io/technology-icons/AdobeAcrobatReaderContinuous-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Acrobat Reader Continuous',
+      'https://assets.wiz.io/technology-icons/AdobeAcrobatContinuous-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Acrobat Continuous',
+      'https://assets.wiz.io/technology-icons/AdobeReaderDCContinuous-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Reader DC Continuous',
+      'https://assets.wiz.io/technology-icons/Rust-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Rust',
+      'https://assets.wiz.io/technology-icons/MozillaThunderbird-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Mozilla Thunderbird',
+      'https://assets.wiz.io/technology-icons/MySQL-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||MySQL',
+      'https://assets.wiz.io/technology-icons/AppleSafari-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Apple Safari',
+      'https://assets.wiz.io/technology-icons/AdobeAcrobat-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Acrobat',
+      'https://assets.wiz.io/technology-icons/AdobeReaderDCClassic-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Reader DC Classic',
+      'https://assets.wiz.io/technology-icons/MozillaFirefoxESR-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Mozilla Firefox ESR',
+      'https://assets.wiz.io/technology-icons/ContainerOptimizedOS-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Container-Optimized OS',
+      'https://assets.wiz.io/technology-icons/Wolfi-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Wolfi',
+      'https://assets.wiz.io/technology-icons/MySQLClientCAPI-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||MySQL Client C API',
+      'https://assets.wiz.io/technology-icons/GitLab-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||GitLab',
+      'https://assets.wiz.io/technology-icons/GitlabEnterprise-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Gitlab Enterprise',
+      'https://assets.wiz.io/technology-icons/AdobeFlashPlayer-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Flash Player',
+      'https://assets.wiz.io/technology-icons/ActiveXControl-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||ActiveX Control',
+      'https://assets.wiz.io/technology-icons/OracleJRE-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Oracle JRE',
+      'https://assets.wiz.io/technology-icons/OracleJDK-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Oracle JDK',
+      'https://assets.wiz.io/technology-icons/JRE-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||JRE',
+      'https://assets.wiz.io/technology-icons/Ruby-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Ruby',
+      'https://assets.wiz.io/technology-icons/AdobeExperienceManager-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Experience Manager',
+      'https://assets.wiz.io/technology-icons/FoxitPDFReader-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Foxit PDF Reader',
+      'https://assets.wiz.io/technology-icons/AdobeReader-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Reader',
+      'https://assets.wiz.io/technology-icons/PepperFlashforGoogleChrome-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Pepper Flash for Google Chrome',
+      'https://assets.wiz.io/technology-icons/MozillaSeaMonkey-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Mozilla SeaMonkey',
+      'https://assets.wiz.io/technology-icons/AppleiTunes-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Apple iTunes',
+      'https://assets.wiz.io/technology-icons/JDK-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||JDK',
+      'https://assets.wiz.io/technology-icons/AmazonCorrettoJDK-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Amazon Corretto JDK',
+      'https://assets.wiz.io/technology-icons/FoxitPhantomPDF-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Foxit PhantomPDF',
+      'https://assets.wiz.io/technology-icons/EclipseAdoptiumJDK-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Eclipse Adoptium JDK',
+      'https://assets.wiz.io/technology-icons/OpenJDKJDK-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||OpenJDK JDK',
+      'https://assets.wiz.io/technology-icons/ImageMagick-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||ImageMagick',
+      'https://assets.wiz.io/technology-icons/Wireshark-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Wireshark',
+      'https://assets.wiz.io/technology-icons/Jenkins-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Jenkins',
+      'https://assets.wiz.io/technology-icons/F5BIGIPVirtualEdition-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||F5 BIG-IP Virtual Edition (tier - best)',
+      'https://assets.wiz.io/technology-icons/OpenJDKJRE-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||OpenJDK JRE',
+      'https://assets.wiz.io/technology-icons/CSharp-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||C#',
+      'https://assets.wiz.io/technology-icons/AdobeAIR-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe AIR',
+      'https://assets.wiz.io/technology-icons/RedHatEnterpriseLinuxCoreOS-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Red Hat Enterprise Linux CoreOS (RHCOS)',
+      'https://assets.wiz.io/technology-icons/F5BIGIPVirtualEdition-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||F5 BIG-IP Virtual Edition',
+      'https://assets.wiz.io/technology-icons/OracleDatabaseServer-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Oracle Database Server',
+      'https://assets.wiz.io/technology-icons/NodeJS-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Node.js',
+      'https://assets.wiz.io/technology-icons/PerconaServerforMySQL-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Percona Server for MySQL',
+      'https://assets.wiz.io/technology-icons/AdobeFlashPlayerESR-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Adobe Flash Player ESR',
+      'https://assets.wiz.io/technology-icons/Ffmpeg-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Ffmpeg',
+      'https://assets.wiz.io/technology-icons/F5BIGIPVirtualEdition-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||F5 BIG-IP Virtual Edition (tier - better)',
+      'https://assets.wiz.io/technology-icons/F5BIGIPAdvancedFirewallManager-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||F5 BIG-IP Advanced Firewall Manager',
+      'https://assets.wiz.io/technology-icons/TensorFlow-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||TensorFlow',
+      'https://assets.wiz.io/technology-icons/Bottlerocket-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Bottlerocket',
+      'https://assets.wiz.io/technology-icons/MariaDBServer-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||MariaDB Server',
+      'https://assets.wiz.io/technology-icons/VirtualBox-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||VirtualBox',
+      'https://assets.wiz.io/technology-icons/OpenShiftNode-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||OpenShift Node',
+      'https://assets.wiz.io/technology-icons/IBMWebSphereApplicationServer-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||IBM WebSphere Application Server',
+      'https://assets.wiz.io/technology-icons/IBMJDK-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||IBM JDK',
+      'https://assets.wiz.io/technology-icons/QEMU-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||QEMU',
+      'https://assets.wiz.io/technology-icons/cPanel-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||cPanel',
+      'https://assets.wiz.io/technology-icons/IBMWebSphereAppServer-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||IBM WebSphere App Server',
+      'https://assets.wiz.io/technology-icons/MicrosoftInternetExplorer9-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Microsoft Internet Explorer 9',
+      'https://assets.wiz.io/technology-icons/AppleiCloud-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Apple iCloud',
+      'https://assets.wiz.io/technology-icons/IBMDb2-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||IBM Db2',
+      'https://assets.wiz.io/technology-icons/GraphicsMagick-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||GraphicsMagick',
+      'https://assets.wiz.io/technology-icons/OraclePeoplesoftEnterprisePeopletools-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Oracle Peoplesoft Enterprise Peopletools',
+      'https://assets.wiz.io/technology-icons/MicrosoftInternetExplorer8-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Microsoft Internet Explorer 8',
+      'https://assets.wiz.io/technology-icons/OracleEBusinessSuite-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Oracle E-Business Suite',
+      'https://assets.wiz.io/technology-icons/OracleCoherence-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Oracle Coherence',
+      'https://assets.wiz.io/technology-icons/MicrosoftInternetExplorer10-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Microsoft Internet Explorer 10',
+      'https://assets.wiz.io/technology-icons/OracleWebLogicServer-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Oracle WebLogic Server',
+      'https://assets.wiz.io/technology-icons/ApacheHTTPServer-4f28eb64-41fe-4ec9-9d63-931187a2b105.svg||Apache HTTP Server'
+    ];
   }
 
   /**
@@ -77,9 +184,13 @@ class WizCVEScraper {
   }
 
   /**
-   * Make a request to the Algolia API
+   * Make a request to Algolia API
+   * @param {number} page - Page number
+   * @param {number} hitsPerPage - Number of hits per page
+   * @param {Array} technologyFilters - Technology filters to apply
+   * @returns {Promise<Object>} API response
    */
-  async makeAlgoliaRequest(page = 0, hitsPerPage = null) {
+  async makeAlgoliaRequest(page = 0, hitsPerPage = null, technologyFilters = []) {
     try {
       const requestPayload = {
         requests: [{
@@ -99,7 +210,10 @@ class WizCVEScraper {
           hitsPerPage: hitsPerPage || this.options.hitsPerPage,
           maxValuesPerFacet: 200,
           page: page,
-          query: ''
+          query: '',
+          facetFilters: technologyFilters.length > 0 ? [
+            technologyFilters.map(filter => `affectedTechnologies.filter:${filter}`)
+          ] : []
         }]
       };
 
@@ -119,76 +233,228 @@ class WizCVEScraper {
   }
 
   /**
-   * Load all CVEs using Algolia API pagination
+   * Load all CVEs using comprehensive scraping strategy
    */
   async loadAllCVEs() {
     try {
-      logger.info('Starting to load all CVEs via Algolia API...');
+      if (this.options.useComprehensiveScraping) {
+        logger.info('Using comprehensive scraping strategy with technology filters');
+        return await this.loadCVEsComprehensive();
+      } else {
+        logger.info('Using standard scraping strategy');
+        return await this.loadCVEsStandard();
+      }
+    } catch (error) {
+      logger.error('Error during CVE loading:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Standard CVE loading (original method)
+   */
+  async loadCVEsStandard() {
+    logger.info('Starting standard CVE loading via Algolia API...');
+    
+    // First, get total count
+    const initialResponse = await this.makeAlgoliaRequest(0, 1);
+    const totalHits = initialResponse.results[0].nbHits || 0;
+    const totalPages = Math.ceil(totalHits / this.options.hitsPerPage);
+    
+    logger.info(`Total CVEs available: ${totalHits}, Total pages: ${totalPages}`);
+    
+    // Determine how many CVEs to actually fetch
+    const maxCVEs = this.options.maxCVEs || totalHits;
+    const pagesToFetch = Math.min(totalPages, Math.ceil(maxCVEs / this.options.hitsPerPage));
+    
+    logger.info(`Will fetch ${pagesToFetch} pages (up to ${maxCVEs} CVEs)`);
+    
+    // Create progress bar
+    const progressBar = new ProgressBar('Loading CVEs [:bar] :current/:total (:percent) ETA: :etas', {
+      complete: '█',
+      incomplete: '░',
+      width: 40,
+      total: pagesToFetch
+    });
+    
+    // Fetch all pages
+    for (let page = 0; page < pagesToFetch; page++) {
+      try {
+        const response = await this.makeAlgoliaRequest(page, this.options.hitsPerPage);
+        const hits = response.results[0].hits || [];
+        
+        // Process each CVE from this page
+        for (const hit of hits) {
+          if (this.cveData.length >= maxCVEs) {
+            break;
+          }
+          
+          const cveData = await this.transformAlgoliaHitToCVE(hit);
+          if (cveData && validateCVEData(cveData)) {
+            this.cveData.push(cveData);
+          }
+          
+          // Add small delay between CVE detail page requests
+          await sleep(100);
+        }
+        
+        progressBar.tick();
+        
+        // Add delay between requests
+        if (page < pagesToFetch - 1) {
+          await sleep(this.options.delayBetweenRequests);
+        }
+        
+        if (this.cveData.length >= maxCVEs) {
+          logger.info(`Reached maximum CVE limit: ${maxCVEs}`);
+          break;
+        }
+        
+      } catch (error) {
+        logger.error(`Failed to fetch page ${page}:`, error.message);
+        // Continue with next page
+      }
+    }
+    
+    logger.info(`Finished loading CVEs. Total collected: ${this.cveData.length}`);
+  }
+
+  /**
+   * Comprehensive CVE loading with parallel technology-based filtering
+   */
+  async loadCVEsComprehensive() {
+    logger.info('Starting comprehensive CVE loading with parallel technology filters...');
+    
+    const allCVEs = new Map(); // Use Map to automatically handle duplicates by CVE ID
+    
+    // Step 1: Fetch all available CVEs without filters (or up to maxCVEs limit)
+    const maxHitsToFetch = this.options.maxCVEs || 140558; // Use maxCVEs or fetch all available
+    logger.info(`Step 1: Fetching up to ${maxHitsToFetch} CVEs without filters...`);
+    await this.fetchCVEsWithFilters([], allCVEs, maxHitsToFetch);
+    
+    // Step 2: Fetch CVEs for all technology filters in parallel
+    logger.info(`Step 2: Fetching CVEs for ${this.technologyFilters.length} technology filters in parallel...`);
+    
+    // Create a progress bar
+    const progressBar = new ProgressBar('Technology filters [:bar] :current/:total (:percent) ETA: :etas', {
+      complete: '█',
+      incomplete: '░',
+      width: 40,
+      total: this.technologyFilters.length
+    });
+    
+    // Define a function to process each technology filter
+    const processTechnologyFilter = async (filter) => {
+      try {
+        const techName = filter.split('||')[1];
+        logger.info(`Fetching CVEs for technology: ${techName}`);
+        
+        await this.fetchCVEsWithFilters([filter], allCVEs, maxHitsToFetch);
+        
+        progressBar.tick();
+        return { success: true, technology: techName };
+      } catch (error) {
+        logger.error(`Failed to fetch CVEs for filter ${filter}:`, error.message);
+        progressBar.tick();
+        return { success: false, technology: filter.split('||')[1], error: error.message };
+      }
+    };
+    
+    // Process all technology filters in parallel with concurrency control
+    const concurrencyLimit = this.options.parallelRequests || 5; // Default to 5 parallel requests
+    logger.info(`Using concurrency limit of ${concurrencyLimit} for parallel processing`);
+    
+    // Split the filters into chunks to control concurrency
+    const chunks = [];
+    for (let i = 0; i < this.technologyFilters.length; i += concurrencyLimit) {
+      chunks.push(this.technologyFilters.slice(i, i + concurrencyLimit));
+    }
+    
+    // Process each chunk in parallel
+    for (const chunk of chunks) {
+      const promises = chunk.map(filter => processTechnologyFilter(filter));
+      await Promise.all(promises);
       
-      // First, get total count
-      const initialResponse = await this.makeAlgoliaRequest(0, 1);
-      const totalHits = initialResponse.results[0].nbHits || 0;
+      // Add a small delay between chunks to avoid overwhelming the API
+      if (this.options.delayBetweenRequests > 0) {
+        await sleep(this.options.delayBetweenRequests);
+      }
+    }
+    
+    // Step 3: Convert Map to array (duplicates already removed)
+    this.cveData = Array.from(allCVEs.values());
+    
+    logger.info(`Step 3: Removed duplicates. Total unique CVEs: ${this.cveData.length}`);
+    logger.info('Parallel comprehensive CVE loading completed.');
+  }
+
+  /**
+   * Fetch CVEs with specific filters (thread-safe for parallel processing)
+   */
+  async fetchCVEsWithFilters(filters, cveMap, maxHits = 1000) {
+    try {
+      // Get total count for this filter
+      const initialResponse = await this.makeAlgoliaRequest(0, 1, filters);
+      const totalHits = Math.min(initialResponse.results[0].nbHits || 0, maxHits);
       const totalPages = Math.ceil(totalHits / this.options.hitsPerPage);
       
-      logger.info(`Total CVEs available: ${totalHits}, Total pages: ${totalPages}`);
+      if (totalHits === 0) {
+        return;
+      }
       
-      // Determine how many CVEs to actually fetch
-      const maxCVEs = this.options.maxCVEs || totalHits;
-      const pagesToFetch = Math.min(totalPages, Math.ceil(maxCVEs / this.options.hitsPerPage));
+      // Collect CVEs for this filter first, then add to shared map
+      const localCVEs = new Map();
       
-      logger.info(`Will fetch ${pagesToFetch} pages (up to ${maxCVEs} CVEs)`);
-      
-      // Create progress bar
-      const progressBar = new ProgressBar('Loading CVEs [:bar] :current/:total (:percent) ETA: :etas', {
-        complete: '█',
-        incomplete: '░',
-        width: 40,
-        total: pagesToFetch
-      });
-      
-      // Fetch all pages
-      for (let page = 0; page < pagesToFetch; page++) {
+      // Fetch all pages for this filter
+      for (let page = 0; page < totalPages; page++) {
         try {
-          const response = await this.makeAlgoliaRequest(page, this.options.hitsPerPage);
+          const response = await this.makeAlgoliaRequest(page, this.options.hitsPerPage, filters);
           const hits = response.results[0].hits || [];
           
           // Process each CVE from this page
           for (const hit of hits) {
-            if (this.cveData.length >= maxCVEs) {
+            // Check both shared map and local collection limits
+            if ((cveMap.size >= this.options.maxCVEs && this.options.maxCVEs > 0) || 
+                (localCVEs.size >= maxHits)) {
               break;
             }
             
             const cveData = await this.transformAlgoliaHitToCVE(hit);
             if (cveData && validateCVEData(cveData)) {
-              this.cveData.push(cveData);
+              // Store in local map first
+              localCVEs.set(cveData.id, cveData);
             }
             
             // Add small delay between CVE detail page requests
-            await sleep(100);
+            await sleep(50);
           }
           
-          progressBar.tick();
-          
-          // Add delay between requests
-          if (page < pagesToFetch - 1) {
-            await sleep(this.options.delayBetweenRequests);
-          }
-          
-          if (this.cveData.length >= maxCVEs) {
-            logger.info(`Reached maximum CVE limit: ${maxCVEs}`);
+          // Break out of page loop if we've reached limits
+          if ((cveMap.size >= this.options.maxCVEs && this.options.maxCVEs > 0) || 
+              (localCVEs.size >= maxHits)) {
             break;
           }
           
+          // Add delay between page requests
+          if (page < totalPages - 1) {
+            await sleep(this.options.delayBetweenRequests);
+          }
+          
         } catch (error) {
-          logger.error(`Failed to fetch page ${page}:`, error.message);
-          // Continue with next page
+          logger.error(`Failed to fetch page ${page} for filter:`, error.message);
         }
       }
       
-      logger.info(`Finished loading CVEs. Total collected: ${this.cveData.length}`);
+      // Add all local CVEs to the shared map (thread-safe operation)
+      for (const [cveId, cveData] of localCVEs) {
+        if (cveMap.size >= this.options.maxCVEs && this.options.maxCVEs > 0) {
+          break;
+        }
+        cveMap.set(cveId, cveData);
+      }
+      
     } catch (error) {
-      logger.error('Error during CVE loading:', error);
-      throw error;
+      logger.error('Error fetching CVEs with filters:', error);
     }
   }
 
