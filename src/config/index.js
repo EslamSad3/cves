@@ -10,15 +10,21 @@ const config = {
     indexName: 'cve-db',
     hitsPerPage: parseInt(process.env.HITS_PER_PAGE) || 20,
     maxPages: parseInt(process.env.MAX_PAGES) || 100,
-    timeout: parseInt(process.env.API_TIMEOUT) || 30000
+    timeout: parseInt(process.env.API_TIMEOUT) || 60000 // Increased from 30s to 60s
   },
 
   // Scraping Configuration
   scraping: {
-    delayBetweenRequests: parseInt(process.env.DELAY_BETWEEN_REQUESTS) || 1000,
-    retryAttempts: parseInt(process.env.RETRY_ATTEMPTS) || 3,
+    delayBetweenRequests: parseInt(process.env.DELAY_BETWEEN_REQUESTS) || 2000, // Increased from 1s to 2s
+    retryAttempts: parseInt(process.env.RETRY_ATTEMPTS) || 5, // Increased from 3 to 5
     maxCVEs: parseInt(process.env.MAX_CVES) || null,
-    targetUrl: process.env.TARGET_URL || 'https://www.wiz.io/vulnerability-database/cve/search'
+    targetUrl: process.env.TARGET_URL || 'https://www.wiz.io/vulnerability-database/cve/search',
+    // Circuit breaker configuration
+    circuitBreakerThreshold: parseInt(process.env.CIRCUIT_BREAKER_THRESHOLD) || 5,
+    circuitBreakerTimeout: parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT) || 60000,
+    // Connection pool settings
+    maxConcurrentRequests: parseInt(process.env.MAX_CONCURRENT_REQUESTS) || 3, // Reduced from 5 to 3
+    requestPoolTimeout: parseInt(process.env.REQUEST_POOL_TIMEOUT) || 120000
   },
 
   // Output Configuration

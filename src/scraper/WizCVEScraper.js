@@ -25,8 +25,17 @@ class WizCVEScraper {
       hitsPerPage: options.hitsPerPage || config.algolia.hitsPerPage,
       maxPages: options.maxPages || config.algolia.maxPages,
       useComprehensiveScraping: options.useComprehensiveScraping !== false,
-      parallelRequests: options.parallelRequests || 5,
+      parallelRequests: options.parallelRequests || config.scraping.maxConcurrentRequests || 3,
+      circuitBreakerThreshold: options.circuitBreakerThreshold || config.scraping.circuitBreakerThreshold || 5,
+      circuitBreakerTimeout: options.circuitBreakerTimeout || config.scraping.circuitBreakerTimeout || 60000,
       ...options
+    };
+    
+    // Circuit breaker state
+    this.circuitBreaker = {
+      failures: 0,
+      lastFailureTime: null,
+      state: 'CLOSED' // CLOSED, OPEN, HALF_OPEN
     };
     
     logger.info(`Scraper initialized with useComprehensiveScraping: ${this.options.useComprehensiveScraping}`);
@@ -184,52 +193,172 @@ class WizCVEScraper {
   }
 
   /**
-   * Make a request to Algolia API
+   * Make a request to Algolia API with retry logic and exponential backoff
    * @param {number} page - Page number
    * @param {number} hitsPerPage - Number of hits per page
    * @param {Array} technologyFilters - Technology filters to apply
    * @returns {Promise<Object>} API response
    */
   async makeAlgoliaRequest(page = 0, hitsPerPage = null, technologyFilters = []) {
-    try {
-      const requestPayload = {
-        requests: [{
-          indexName: this.algoliaConfig.indexName,
-          facets: [
-            'affectedTechnologies.filter',
-            'exploitable',
-            'hasCisaKevExploit',
-            'hasFix',
-            'isHighProfileThreat',
-            'publishedAt',
-            'severity',
-            'sourceFeeds.filter'
-          ],
-          highlightPostTag: '__/ais-highlight__',
-          highlightPreTag: '__ais-highlight__',
-          hitsPerPage: hitsPerPage || this.options.hitsPerPage,
-          maxValuesPerFacet: 200,
-          page: page,
-          query: '',
-          facetFilters: technologyFilters.length > 0 ? [
-            technologyFilters.map(filter => `affectedTechnologies.filter:${filter}`)
-          ] : []
-        }]
-      };
-
-      const headers = {
-        'Content-Type': 'application/json',
-        'x-algolia-agent': 'Algolia for JavaScript (5.25.0); Search (5.25.0); Browser; instantsearch.js (4.78.3); react (19.1.0); react-instantsearch (7.15.8); react-instantsearch-core (7.15.8); next.js (15.3.3); JS Helper (3.25.0)',
-        'x-algolia-api-key': this.algoliaConfig.apiKey,
-        'x-algolia-application-id': this.algoliaConfig.applicationId
-      };
-
-      const response = await axios.post(this.algoliaConfig.baseUrl, requestPayload, { headers });
-      return response.data;
-    } catch (error) {
-      logger.error('Algolia API request failed:', error.message);
-      throw error;
+    // Check circuit breaker state
+    if (this.circuitBreaker.state === 'OPEN') {
+      const timeSinceLastFailure = Date.now() - this.circuitBreaker.lastFailureTime;
+      if (timeSinceLastFailure < this.options.circuitBreakerTimeout) {
+        throw new Error(`Circuit breaker is OPEN. Failing fast. Time remaining: ${Math.round((this.options.circuitBreakerTimeout - timeSinceLastFailure) / 1000)}s`);
+      } else {
+        // Transition to HALF_OPEN
+        this.circuitBreaker.state = 'HALF_OPEN';
+        logger.info('Circuit breaker transitioning to HALF_OPEN state');
+      }
     }
+
+    const maxRetries = this.options.retryAttempts;
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const requestPayload = {
+          requests: [{
+            indexName: this.algoliaConfig.indexName,
+            facets: [
+              'affectedTechnologies.filter',
+              'exploitable',
+              'hasCisaKevExploit',
+              'hasFix',
+              'isHighProfileThreat',
+              'publishedAt',
+              'severity',
+              'sourceFeeds.filter'
+            ],
+            highlightPostTag: '__/ais-highlight__',
+            highlightPreTag: '__ais-highlight__',
+            hitsPerPage: hitsPerPage || this.options.hitsPerPage,
+            maxValuesPerFacet: 200,
+            page: page,
+            query: '',
+            facetFilters: technologyFilters.length > 0 ? [
+              technologyFilters.map(filter => `affectedTechnologies.filter:${filter}`)
+            ] : []
+          }]
+        };
+
+        const headers = {
+          'Content-Type': 'application/json',
+          'x-algolia-agent': 'Algolia for JavaScript (5.25.0); Search (5.25.0); Browser; instantsearch.js (4.78.3); react (19.1.0); react-instantsearch (7.15.8); react-instantsearch-core (7.15.8); next.js (15.3.3); JS Helper (3.25.0)',
+          'x-algolia-api-key': this.algoliaConfig.apiKey,
+          'x-algolia-application-id': this.algoliaConfig.applicationId
+        };
+
+        // Configure axios with timeout and retry-friendly settings
+        const axiosConfig = {
+          headers,
+          timeout: this.algoliaConfig.timeout,
+          // Add connection timeout
+          httpsAgent: new (require('https').Agent)({
+            keepAlive: true,
+            timeout: this.algoliaConfig.timeout,
+            freeSocketTimeout: 30000
+          }),
+          // Retry on network errors
+          validateStatus: (status) => status < 500
+        };
+
+        const response = await axios.post(this.algoliaConfig.baseUrl, requestPayload, axiosConfig);
+        
+        // Check for successful response
+        if (response.status >= 200 && response.status < 300) {
+          // Reset circuit breaker on success
+          if (this.circuitBreaker.state === 'HALF_OPEN') {
+            this.circuitBreaker.state = 'CLOSED';
+            this.circuitBreaker.failures = 0;
+            logger.info('Circuit breaker reset to CLOSED state after successful request');
+          }
+          
+          if (attempt > 1) {
+            logger.info(`Request succeeded on attempt ${attempt}`);
+          }
+          return response.data;
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+      } catch (error) {
+        lastError = error;
+        const isRetryableError = this.isRetryableError(error);
+        
+        if (attempt === maxRetries || !isRetryableError) {
+          // Update circuit breaker on final failure
+          this.circuitBreaker.failures++;
+          this.circuitBreaker.lastFailureTime = Date.now();
+          
+          if (this.circuitBreaker.failures >= this.options.circuitBreakerThreshold) {
+            this.circuitBreaker.state = 'OPEN';
+            logger.warn(`Circuit breaker opened after ${this.circuitBreaker.failures} failures`);
+          }
+          
+          logger.error(`Algolia API request failed after ${attempt} attempts:`, {
+            error: error.message,
+            code: error.code,
+            page,
+            filters: technologyFilters.length,
+            retryable: isRetryableError,
+            circuitBreakerState: this.circuitBreaker.state,
+            circuitBreakerFailures: this.circuitBreaker.failures
+          });
+          throw error;
+        }
+
+        // Calculate exponential backoff delay
+        const baseDelay = 1000; // 1 second
+        const backoffDelay = baseDelay * Math.pow(2, attempt - 1);
+        const jitterDelay = Math.random() * 1000; // Add jitter to prevent thundering herd
+        const totalDelay = Math.min(backoffDelay + jitterDelay, 30000); // Cap at 30 seconds
+
+        logger.warn(`Request failed (attempt ${attempt}/${maxRetries}), retrying in ${Math.round(totalDelay)}ms:`, {
+          error: error.message,
+          code: error.code,
+          page,
+          filters: technologyFilters.length
+        });
+
+        await sleep(totalDelay);
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * Determine if an error is retryable
+   * @param {Error} error - The error to check
+   * @returns {boolean} Whether the error is retryable
+   */
+  isRetryableError(error) {
+    // Network timeout errors
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
+      return true;
+    }
+    
+    // Axios timeout
+    if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {
+      return true;
+    }
+    
+    // HTTP 5xx server errors
+    if (error.response && error.response.status >= 500) {
+      return true;
+    }
+    
+    // Rate limiting (429)
+    if (error.response && error.response.status === 429) {
+      return true;
+    }
+    
+    // DNS resolution errors
+    if (error.code === 'ENOTFOUND' || error.code === 'EAI_AGAIN') {
+      return true;
+    }
+    
+    return false;
   }
 
   /**
@@ -395,13 +524,53 @@ class WizCVEScraper {
     
     logger.info(`Starting ${allTasks.length} parallel tasks (1 initial + ${this.technologyFilters.length} technology filters)...`);
     
-    // Execute all tasks in parallel
-    const results = await Promise.all(allTasks);
+    // Execute all tasks in parallel with improved error handling
+    const results = await Promise.allSettled(allTasks);
     
-    // Log results summary
-    const successfulTasks = results.filter(r => r.success).length;
-    const failedTasks = results.filter(r => !r.success).length;
-    logger.info(`Parallel execution completed: ${successfulTasks} successful, ${failedTasks} failed`);
+    // Process results with detailed logging
+    const successfulResults = [];
+    const failedResults = [];
+    
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value.success) {
+        successfulResults.push(result.value);
+      } else {
+        const taskType = index === 0 ? 'initial' : `filter-${this.technologyFilters[index - 1]}`;
+        const error = result.status === 'rejected' ? result.reason : result.value.error;
+        failedResults.push({ taskType, error: error.message });
+        logger.warn(`Task failed: ${taskType} - ${error.message}`);
+      }
+    });
+    
+    logger.info(`Parallel execution completed: ${successfulResults.length} successful, ${failedResults.length} failed`);
+    
+    // Log failed tasks for debugging
+    if (failedResults.length > 0) {
+      logger.warn('Failed tasks summary:', failedResults.map(f => f.taskType));
+    }
+    
+    // Combine all CVE data from successful tasks into the existing Map
+    successfulResults.forEach(result => {
+      if (result.data && Array.isArray(result.data)) {
+        result.data.forEach(cve => {
+          if (cve && cve.id) {
+            allCVEs.set(cve.id, cve);
+          }
+        });
+      }
+    });
+    
+    // Check if we have any data at all
+    if (allCVEs.size === 0) {
+      logger.error('No CVE data collected from any source. All parallel tasks failed.');
+      throw new Error('Complete failure: No CVE data could be retrieved from any source');
+    }
+    
+    // Warn if too many tasks failed
+    const failureRate = failedResults.length / allTasks.length;
+    if (failureRate > 0.5) {
+      logger.warn(`High failure rate detected: ${Math.round(failureRate * 100)}% of tasks failed`);
+    }
     
     // Convert Map to array (duplicates already removed)
     this.cveData = Array.from(allCVEs.values());
