@@ -455,6 +455,7 @@ class WizCVEScraper {
     logger.info('Starting comprehensive CVE loading with parallel technology filters...');
     
     const allCVEs = new Map(); // Use Map to automatically handle duplicates by CVE ID
+    this.currentAllCVEs = allCVEs; // Store reference for graceful shutdown access
     const maxHitsToFetch = this.options.maxCVEs || 140558; // Use maxCVEs or fetch all available
     
     // Create progress bars
@@ -574,6 +575,10 @@ class WizCVEScraper {
     
     // Convert Map to array (duplicates already removed)
     this.cveData = Array.from(allCVEs.values());
+    
+    // Don't clear currentAllCVEs immediately - keep it for graceful shutdown
+    // It will be cleared in cleanup() method
+    // this.currentAllCVEs = null;
     
     logger.info(`Final result: ${this.cveData.length} unique CVEs collected`);
     logger.info('Parallel comprehensive CVE loading completed.');
@@ -864,6 +869,9 @@ class WizCVEScraper {
    */
   async cleanup() {
     try {
+      // Clear intermediate data to prevent memory leaks
+      this.currentAllCVEs = null;
+      
       // No browser to clean up in API-based approach
       logger.info('Cleanup completed successfully');
     } catch (error) {
@@ -881,6 +889,25 @@ class WizCVEScraper {
       duration,
       averageTimePerCVE: this.processedCount > 0 ? duration / this.processedCount : 0
     };
+  }
+
+  /**
+   * Get all collected CVEs (including intermediate data during processing)
+   * This method allows graceful shutdown to access data before final processing
+   */
+  getAllCollectedCVEs() {
+    // If final cveData is available, return it
+    if (this.cveData && this.cveData.length > 0) {
+      return this.cveData;
+    }
+    
+    // If we're in the middle of comprehensive loading, try to access intermediate data
+    // This is a fallback for graceful shutdown scenarios
+    if (this.currentAllCVEs && this.currentAllCVEs.size > 0) {
+      return Array.from(this.currentAllCVEs.values());
+    }
+    
+    return [];
   }
 }
 

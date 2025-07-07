@@ -4,11 +4,7 @@ const path = require('path');
 const { Command } = require('commander');
 const WizCVEScraper = require('./scraper/WizCVEScraper');
 const logger = require('./utils/logger');
-const { 
-  saveToJson, 
-  loadLatestCheckpoint, 
-  generateAnalytics 
-} = require('./utils/helpers');
+const { saveToJson, saveToTextFile, loadLatestCheckpoint, generateAnalytics, extractBaseUrls } = require('./utils/helpers');
 const config = require('./config');
 
 // Handle uncaught exceptions
@@ -23,21 +19,112 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Handle graceful shutdown
-process.on('SIGINT', () => {
-  logger.info('Received SIGINT, shutting down gracefully...');
-  process.exit(0);
-});
+let isShuttingDown = false;
 
-process.on('SIGTERM', () => {
-  logger.info('Received SIGTERM, shutting down gracefully...');
-  process.exit(0);
-});
+const gracefulShutdown = async (signal) => {
+  if (isShuttingDown) {
+    logger.warn('Force shutdown requested, exiting immediately...');
+    process.exit(1);
+  }
+  
+  isShuttingDown = true;
+  logger.info(`Received ${signal}, shutting down gracefully...`);
+  
+  try {
+    // Get the current app instance if it exists
+    const appInstance = global.currentAppInstance;
+    
+    if (appInstance && appInstance.scraper) {
+      logger.info('Saving current progress before shutdown...');
+      
+      // Save checkpoint if we have any data
+       let dataToSave = [];
+       
+       // Check for completed CVE data first
+       if (appInstance.scraper.cveData && appInstance.scraper.cveData.length > 0) {
+         dataToSave = appInstance.scraper.cveData;
+         logger.info(`Found completed CVE data: ${dataToSave.length} CVEs`);
+       }
+       // If no completed data, check for intermediate data in the scraper's internal state
+       else if (appInstance.scraper.getAllCollectedCVEs) {
+         dataToSave = appInstance.scraper.getAllCollectedCVEs();
+         logger.info(`Found intermediate CVE data: ${dataToSave.length} CVEs`);
+       }
+       
+       if (dataToSave.length > 0) {
+         const { saveCheckpoint, saveToJson } = require('./utils/helpers');
+         const config = require('./config');
+         
+         try {
+           // Save checkpoint
+           await saveCheckpoint(dataToSave, appInstance.scraper.processedCount || dataToSave.length);
+           logger.info(`Checkpoint saved with ${dataToSave.length} CVEs`);
+           
+           // Save partial results with analytics
+           const partialResult = {
+             scrapeDate: new Date().toISOString(),
+             totalCVEs: dataToSave.length,
+             cveData: dataToSave,
+             metadata: {
+               processedCount: appInstance.scraper.processedCount || dataToSave.length,
+               interruptedAt: new Date().toISOString(),
+               isPartialResult: true,
+               stats: appInstance.scraper.getStats()
+             }
+           };
+           
+           // Save main data file
+           const outputPath = await saveToJson('cve_data', partialResult, config.output.dir, true);
+           logger.info(`CVE data saved to: ${outputPath}`);
+           
+           // Generate and save analytics
+           const { generateAnalytics } = require('./utils/helpers');
+           const analytics = generateAnalytics(dataToSave);
+           const analyticsPath = await saveToJson('cve_data_analytics', analytics, config.output.dir, true);
+           logger.info(`Analytics saved to: ${analyticsPath}`);
+           
+           // Extract and save base URLs from external links
+           logger.info('Extracting base URLs from external links...');
+           const baseUrls = extractBaseUrls(dataToSave);
+           
+           if (baseUrls.length > 0) {
+             const urlsText = baseUrls.join('\n');
+             await saveToTextFile(urlsText, 'external_base_urls', config.output.dir, true);
+             logger.info(`Extracted and saved ${baseUrls.length} unique base URLs during graceful shutdown`);
+           } else {
+             logger.info('No external URLs found to extract during graceful shutdown');
+           }
+           
+         } catch (saveError) {
+           logger.error('Error saving data during graceful shutdown:', saveError);
+         }
+       } else {
+         logger.info('No CVE data collected yet, skipping checkpoint save');
+       }
+      
+      // Cleanup scraper resources
+      await appInstance.scraper.cleanup();
+    }
+    
+    logger.info('Graceful shutdown completed');
+  } catch (error) {
+    logger.error('Error during graceful shutdown:', error);
+  } finally {
+    process.exit(0);
+  }
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 class CVEScraperApp {
   constructor() {
     this.scraper = null;
     this.program = new Command();
     this.setupCLI();
+    
+    // Store instance globally for graceful shutdown access
+    global.currentAppInstance = this;
   }
 
   setupCLI() {
@@ -119,6 +206,20 @@ class CVEScraperApp {
         
         await saveToJson(`${options.output}_analytics`, analyticsResult, config.output.dir, useTimestampedFolder);
         logger.info('Analytics generated and saved');
+      }
+      
+      // Extract and save base URLs from external links
+      if (result.cveData.length > 0) {
+        logger.info('Extracting base URLs from external links...');
+        const baseUrls = extractBaseUrls(result.cveData);
+        
+        if (baseUrls.length > 0) {
+          const urlsText = baseUrls.join('\n');
+          await saveToTextFile(urlsText, 'external_base_urls', config.output.dir, useTimestampedFolder);
+          logger.info(`Extracted and saved ${baseUrls.length} unique base URLs`);
+        } else {
+          logger.info('No external URLs found to extract');
+        }
       }
 
       // Display summary

@@ -31,7 +31,7 @@ const config = {
   output: {
     dir: process.env.OUTPUT_DIR || './output',
     filename: process.env.OUTPUT_FILENAME || 'cve_data',
-    saveCheckpoints: process.env.SAVE_CHECKPOINTS === 'true',
+    saveCheckpoints: process.env.SAVE_CHECKPOINTS !== 'false', // Enable by default, disable with 'false'
     checkpointInterval: parseInt(process.env.CHECKPOINT_INTERVAL) || 100
   },
 

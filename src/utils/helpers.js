@@ -319,16 +319,95 @@ const generateAnalytics = (cveData) => {
   return analytics;
 };
 
+/**
+ * Save text data to file
+ * @param {string} data - Text data to save
+ * @param {string} filename - Base filename (without extension)
+ * @param {string} outputDir - Output directory
+ * @param {boolean} useTimestampedFolder - Whether to use timestamped folder
+ * @returns {Promise<string>} - File path
+ */
+const saveToTextFile = async (data, filename, outputDir = config.outputDir, useTimestampedFolder = true) => {
+  let finalOutputDir = outputDir;
+  
+  if (useTimestampedFolder) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0] + '_' + 
+                     new Date().toISOString().replace(/[:.]/g, '-').split('T')[1].split('.')[0];
+    finalOutputDir = path.join(outputDir, `scrape_${timestamp}`);
+  }
+  
+  await ensureDir(finalOutputDir);
+  
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const fullFilename = `${filename}_${timestamp}.txt`;
+  const filePath = path.join(finalOutputDir, fullFilename);
+  
+  try {
+    await fs.writeFile(filePath, data, 'utf8');
+    logger.info(`Text data saved to: ${filePath}`);
+    
+    // Also save as latest in the main output directory
+    const latestPath = path.join(outputDir, `${filename}_latest.txt`);
+    await fs.writeFile(latestPath, data, 'utf8');
+    
+    return filePath;
+  } catch (error) {
+    logger.error(`Failed to save text data to: ${filePath}`, error);
+    throw error;
+  }
+};
+
+/**
+ * Extract and process external URLs from CVE data
+ * @param {Array} cveData - Array of CVE objects
+ * @returns {Array} - Array of unique base URLs
+ */
+const extractBaseUrls = (cveData) => {
+  const allUrls = new Set();
+  
+  cveData.forEach(cve => {
+    // Extract from sourceUrl
+    if (cve.sourceUrl) {
+      allUrls.add(cve.sourceUrl);
+    }
+    
+    // Extract from additionalResources.externalLinks
+    if (cve.additionalResources && cve.additionalResources.externalLinks) {
+      cve.additionalResources.externalLinks.forEach(link => {
+        if (link.url) {
+          allUrls.add(link.url);
+        }
+      });
+    }
+  });
+  
+  // Convert URLs to base domains
+  const baseUrls = new Set();
+  allUrls.forEach(url => {
+    try {
+      const urlObj = new URL(url);
+      const baseUrl = `${urlObj.protocol}//${urlObj.hostname}`;
+      baseUrls.add(baseUrl);
+    } catch (error) {
+      logger.warn(`Invalid URL encountered: ${url}`);
+    }
+  });
+  
+  return Array.from(baseUrls).sort();
+};
+
 module.exports = {
   sleep,
   retryWithBackoff,
   ensureDir,
   saveToJson,
+  saveToTextFile,
   loadFromJson,
   saveCheckpoint,
   loadLatestCheckpoint,
   validateCVEData,
   cleanText,
   parseCVSSScore,
-  generateAnalytics
+  generateAnalytics,
+  extractBaseUrls
 };
